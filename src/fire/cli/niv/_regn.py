@@ -20,6 +20,12 @@ from fire.cli.ts.plot_ts import (
     plot_tidsserier,
 )
 
+# from fire.api.geodetic_levelling.geodetic_correction_levelling_obs import (
+#     apply_geodetic_corrections_to_height_diffs,
+# )
+from astropy.coordinates import solar_system_ephemeris
+
+# import fire.api.geodetic_levelling.geodetic_correction_levelling_obs
 from fire.cli.niv import (
     find_faneblad,
     gyldighedstidspunkt,
@@ -29,10 +35,13 @@ from fire.cli.niv import (
     skriv_ark,
     er_projekt_okay,
     hent_relevante_tidsserier,
-    udled_jessenpunkt_fra_punktoversigt
+    udled_jessenpunkt_fra_punktoversigt,
 )
 
 from fire.cli.niv._netoversigt import netanalyse
+
+# Skal ændres til fire\data\grids når vi får lagt gridsne derover
+DEFAULT_STI_GRIDS = Path(__file__).parents[3] / Path("geodetic-levelling/grids")
 
 
 @dataclass
@@ -77,7 +86,6 @@ class Arbejdssæt:
 
 
 @niv.command()
-@fire.cli.default_options()
 @click.argument("projektnavn", nargs=1, type=str)
 @click.option(
     "-P",
@@ -87,7 +95,28 @@ class Arbejdssæt:
     default=False,
     help="Angiv om beregnede koter skal plottes som forlængelse af en tidsserie",
 )
-def regn(projektnavn: str, plot: bool, **kwargs) -> None:
+@click.option(
+    "--tidal-system",
+    type=str,
+    default="non",
+    required=False,
+    help="Angiv tidesystem",
+)
+@click.option(
+    "-KO",
+    "--korriger-observationer",
+    type=bool,
+    default=False,
+    help="Angiv om observationer skal korrigeres inden udjævning",
+)
+@fire.cli.default_options()
+def regn(
+    projektnavn: str,
+    plot: bool,
+    tidal_system: str,
+    korriger_observationer: bool,
+    **kwargs,
+) -> None:
     """Beregn nye koter.
 
     Forudsat nivellementsobservationer allerede er indlæst i sagsregnearket
@@ -202,6 +231,15 @@ def regn(projektnavn: str, plot: bool, **kwargs) -> None:
     observationer = find_faneblad(projektnavn, "Observationer", arkdef.OBSERVATIONER)
     punktoversigt = find_faneblad(projektnavn, "Punktoversigt", arkdef.PUNKTOVERSIGT)
     arbejdssæt = find_faneblad(projektnavn, aktuelt_faneblad, arkdef.PUNKTOVERSIGT)
+
+    # Korrigér observationer
+    if korriger_observationer:
+        print("Laver geodætiske korrektioner inden udjævning")
+        observationer = apply_geodetic_corrections_to_height_diffs(
+            observationer,
+            arbejdssæt,
+            tidal_system,
+        )
 
     # Til den endelige beregning skal vi bruge de oprindelige observationsdatoer
     if not kontrol:

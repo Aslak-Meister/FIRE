@@ -4,10 +4,12 @@ from pathlib import Path
 
 import pandas as pd
 
+breakpoint()
 from fire.api.geodetic_levelling.tidal_transformation import (
     apply_tidal_corrections_to_height_diff,
 )
 
+breakpoint()
 from fire.api.geodetic_levelling.time_propagation import (
     propagate_height_diff_from_epoch_to_epoch,
 )
@@ -18,9 +20,8 @@ from fire.api.geodetic_levelling.metric_to_gpu_transformation import (
 
 
 def apply_geodetic_corrections_to_height_diffs(
-    fire_project: str,
-    excel_inputfolder: Path,
-    outputfolder: Path,
+    observations_df: pd.DataFrame,
+    points_df: pd.DataFrame,
     grid_inputfolder: Path = None,
     height_diff_unit: str = "metric",
     tidal_system: str = None,
@@ -76,13 +77,6 @@ def apply_geodetic_corrections_to_height_diffs(
 
     TO DO: Samle "underparametre" i en eller flere dicts, fx tidal_parameters: dict = {},
     """
-    # Make sure that the output folder exists
-    outputfolder.mkdir(parents=True, exist_ok=True)
-
-    excel_inputfile = excel_inputfolder / f"{fire_project}.xlsx"
-
-    observations_df = pd.read_excel(excel_inputfile, sheet_name="Observationer")
-    points_df = pd.read_excel(excel_inputfile, sheet_name="Punktoversigt")
 
     # TO DO: Flyt if-sætningerne, der kontrollerer hvilke korrektioner der foretages,
     # foran for-loopet over observations_df.index og loop i stedet op til 3 gange over
@@ -139,9 +133,9 @@ def apply_geodetic_corrections_to_height_diffs(
                 gravitymodel=gravitymodel,
             )
 
-            observations_df.at[
-                index, f"ΔH tidal correction (tidal system: {tidal_system}) [m]"
-            ] = tidal_corr
+            # observations_df.at[
+            #     index, f"ΔH tidal correction (tidal system: {tidal_system}) [m]"
+            # ] = tidal_corr
 
         # The metric height differences of a FIRE project are propagated to a target epoch if
         # the function apply_geodetic_corrections_to_height_diffs is called with arguments for
@@ -163,9 +157,9 @@ def apply_geodetic_corrections_to_height_diffs(
                 deformationmodel,
             )
 
-            observations_df.at[
-                index, f"ΔH epoch correction (target epoch: {epoch_target}) [m]"
-            ] = epoch_corr
+            # observations_df.at[
+            #     index, f"ΔH epoch correction (target epoch: {epoch_target}) [m]"
+            # ] = epoch_corr
 
         # The metric height differences of a FIRE project are converted to geopotential units if
         # the function apply_geodetic_corrections_to_height_diffs is called with argument "gpu"
@@ -189,10 +183,10 @@ def apply_geodetic_corrections_to_height_diffs(
                 )
             )
 
-            observations_df.at[
-                index,
-                f"ΔH m2gpu multiplication factor (tidal system: {tidal_system}) [m/s^2]",
-            ] = m2gpu_factor
+            # observations_df.at[
+            #     index,
+            #     f"ΔH m2gpu multiplication factor (tidal system: {tidal_system}) [m/s^2]",
+            # ] = m2gpu_factor
 
         elif height_diff_unit == "metric":
             pass
@@ -205,6 +199,8 @@ def apply_geodetic_corrections_to_height_diffs(
 
         # Update of observations_df with corrected height difference
         observations_df.at[index, "ΔH"] = height_diff
+
+    return observations_df
 
     # DataFrame with parameters of output fire project
     parameters_df = pd.read_excel(excel_inputfile, sheet_name="Parametre")
