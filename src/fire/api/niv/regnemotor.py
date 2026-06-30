@@ -411,15 +411,15 @@ class GamaRegn(RegneMotor):
         self.xml_out = xml_out or f"{self.projektnavn}-resultat.xml"
         self.html_out = html_out or f"{self.projektnavn}-resultat.html"
 
-    @property
-    def filer(self) -> list:
+    def _get_filer(self) -> list:
         """En liste af filer som Gama producerer"""
         return [self.xml_in, self.xml_out, self.html_out]
 
-    @filer.setter
-    def filer(self, nye_filnavne):
+    def _set_filer(self, nye_filnavne):
         """Sæt nye filnavne"""
         self.xml_in, self.xml_out, self.html_out = nye_filnavne
+
+    filer = property(fget=_get_filer, fset=_set_filer)
 
     @property
     def parametre(self) -> dict:
@@ -539,7 +539,6 @@ class GamaRegn(RegneMotor):
 
     def udjævn(self):
         """Skriver gama input, kalder gama og læser gama output."""
-
         self.skriv_gama_inputfil()
         self.kald_gama()
         self.nye_koter = self.læs_gama_outputfil()
@@ -550,24 +549,21 @@ class DumRegn(RegneMotor):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._filer = []
 
-    def udjævn(self):
-        self.nye_koter = self.gamle_koter
+    def _get_filer(self) -> list:
+        return []
 
-    @property
-    def filer(self) -> list:
-        """DumRegn producerer ingen filer, returnerer altid den samme tomme liste."""
-        return self._filer
+    def _set_filer(self, _):
+        return
 
-    @filer.setter
-    def filer(self, _):
-        """En dum setter, der ikke ændrer noget."""
+    filer = property(fget=_get_filer, fset=_set_filer)
 
     @property
     def parametre(self) -> dict:
-        """En dict af parametre brugt i DumRegn"""
         return dict()
+
+    def udjævn(self):
+        self.nye_koter = self.gamle_koter
 
 
 class GeodætiskRegn(GamaRegn):
@@ -591,16 +587,14 @@ class GeodætiskRegn(GamaRegn):
     en uplift-/deformationsmodel, der beskriver det langbølgede deformationssignal (herunder
     uplift) ift. "geoiden". Styres vha. parameteren "epoch_target" (enhed decimalår). Default er
     None, dvs. ingen uplift-korrektion. Uplift-korrektion forudsætter endvidere, at der vha.
-    parametrene "deformationmodel" samt "grid_inputfolder" er angivet et filnavn og en sti til en
-    deformationsmodel.
+    parameteren "deformationmodel" er angivet en sti til en deformationsmodel.
 
     Tyngdekorrektion:
     Konvertering af "rå", metriske nivellementsobservationer til geopotentialforskelle. Styres vha.
     parameteren "height_diff_unit": "metric" for ingen konvertering, "gpu" for konvertering
     til geopotentialforskelle (enhed gpu). Default er "metric", dvs. ingen konvertering.
-    Tyngdekorrektion forudsætter endvidere, at der vha. parametrene "gravitymodel" samt
-    "grid_inputfolder" er angivet et filnavn og en sti til en overflade-tyngdemodel i zero tide
-    system.
+    Tyngdekorrektion forudsætter endvidere, at der vha. parameteren "gravitymodel" er angivet
+    en sti til en overflade-tyngdemodel i zero tide system.
 
     Konvertering af højder fra databasen:
     Konvertering af eksisterende Helmert-højder fra FIRE-databasen (GeodætiskRegn attributten
@@ -633,7 +627,6 @@ class GeodætiskRegn(GamaRegn):
         output_height: str = None,
         deformationmodel: str = None,
         gravitymodel: str = None,
-        grid_inputfolder: str = None,
         filnavn_korrektioner: str = None,
         **kwargs,
     ):
@@ -653,7 +646,6 @@ class GeodætiskRegn(GamaRegn):
         self.output_height = output_height or None
         self.deformationmodel = deformationmodel or None
         self.gravitymodel = gravitymodel or None
-        self.grid_inputfolder = Path(grid_inputfolder) if grid_inputfolder else None
 
         # Initialiserer nedarvede parametre, herunder self.projektnavn
         super().__init__(**kwargs)
@@ -663,29 +655,28 @@ class GeodætiskRegn(GamaRegn):
             filnavn_korrektioner or f"{self.projektnavn}-korrektioner.xlsx"
         )
 
-    @property
-    def filer(self) -> list:
+    def _get_filer(self) -> list:
         """En liste af filer som GeodætiskRegn producerer"""
-        return [self.xml_in, self.xml_out, self.html_out, self.filnavn_korrektioner]
+        return super()._get_filer() + [self.filnavn_korrektioner]
 
-    @filer.setter
-    def filer(self, nye_filnavne):
+    def _set_filer(self, nye_filnavne):
         """Sæt nye filnavne"""
-        self.xml_in, self.xml_out, self.html_out, self.filnavn_korrektioner = (
-            nye_filnavne
-        )
+
+        super()._set_filer(nye_filnavne[:-1])
+        self.filnavn_korrektioner = nye_filnavne[-1]
+
+    filer = property(fget=_get_filer, fset=_set_filer)
 
     @property
     def parametre(self) -> dict:
 
-        return dict(
+        return super().parametre | dict(
             tidal_system=self.tidal_system,
             epoch_target=self.epoch_target,
             height_diff_unit=self.height_diff_unit,
             output_height=self.output_height,
             deformationmodel=self.deformationmodel,
             gravitymodel=self.gravitymodel,
-            grid_inputfolder=self.grid_inputfolder,
         )
 
     def korriger_observationer(self):
@@ -703,7 +694,7 @@ class GeodætiskRegn(GamaRegn):
         ):
             print("Højdeforskelle påføres geodætiske korrektioner inden udjævning")
 
-            (self._observationer, self.korrektioner_obs) = (
+            self._observationer, self.korrektioner_obs = (
                 apply_geodetic_corrections_to_height_diff_objects(
                     self._observationer,
                     self._gamle_koter,
@@ -711,7 +702,6 @@ class GeodætiskRegn(GamaRegn):
                     self.epoch_target,
                     self.tidal_system,
                     use_approx_tidal_formulas=False,
-                    grid_inputfolder=self.grid_inputfolder,
                     deformationmodel=self.deformationmodel,
                     gravitymodel=self.gravitymodel,
                 )
@@ -727,11 +717,10 @@ class GeodætiskRegn(GamaRegn):
             # Helmert-højderne fra databasen gemmes inden konvertering til geopotentielle højder
             self.gamle_koter_db = self.gamle_koter
 
-            (self.gamle_koter, self.tyngder_konvertering_til_gpu) = (
+            self.gamle_koter, self.tyngder_konvertering_til_gpu = (
                 convert_geopotential_heights_to_metric_heights(
                     self.gamle_koter,
                     "helmert_to_geopot",
-                    self.grid_inputfolder,
                     self.gravitymodel,
                     self.tidal_system,
                     use_approx_tidal_formulas=False,
@@ -750,11 +739,10 @@ class GeodætiskRegn(GamaRegn):
                 f"Højder konverteres fra geopotentielle højder til {deskriptor[self.output_height]} efter udjævning"
             )
 
-            (self.nye_koter, self.tyngder_konvertering_til_meter) = (
+            self.nye_koter, self.tyngder_konvertering_til_meter = (
                 convert_geopotential_heights_to_metric_heights(
                     self.nye_koter,
                     f"geopot_to_{self.output_height}",
-                    self.grid_inputfolder,
                     self.gravitymodel,
                     self.tidal_system,
                     use_approx_tidal_formulas=False,
@@ -820,9 +808,7 @@ class GeodætiskRegn(GamaRegn):
         """
         self.korriger_observationer()
         self.konverter_gamle_højder_til_gpu()
-        self.skriv_gama_inputfil()
-        self.kald_gama()
-        self.nye_koter = self.læs_gama_outputfil()
+        super().udjævn()
         self.konverter_nye_højder_til_meter()
         self.gendan_gamle_højder()
         self.skriv_korrektioner()
@@ -845,30 +831,18 @@ class DVR90Regn(GeodætiskRegn):
         output_height: str = "helmert",
         deformationmodel: str = "DKup24geo_DTU2024_PK.tif",
         gravitymodel: str = "dk-g-direkte-fra-gri-thokn.tif",
-        grid_inputfolder: str = "C:/FIRE-DEV/src/fire/data",
         **kwargs,
     ):
-        # Initialiserer nedarvede parametre
-        super().__init__(**kwargs)
-
-        # Re-intitialiser parametre vedr. geodætiske korrektioner med default-værdier for
-        # DVR90Regn og/eller regneparametre fra kommandolinje-interface
-        self.tidal_system = tidal_system or None
-        # Konvertering fra decimalår til datetime
-        # Hvis epoch_target ligger langt tilbage eller frem i tid kan det medføre ErfaWarnings
-        # ang. "dubious year", hvilke vi ikke ønsker at se i denne specifikke sammenhæng
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=erfa.ErfaWarning)
-            self.epoch_target = (
-                Time(epoch_target, format="decimalyear").datetime
-                if epoch_target
-                else None
-            )
-        self.height_diff_unit = height_diff_unit
-        self.output_height = output_height or None
-        self.deformationmodel = deformationmodel or None
-        self.gravitymodel = gravitymodel or None
-        self.grid_inputfolder = Path(grid_inputfolder) if grid_inputfolder else None
+        # Initialiserer geodætisk regn med de fastsatte parametre.
+        super().__init__(
+            tidal_system=tidal_system,
+            epoch_target=epoch_target,
+            height_diff_unit=height_diff_unit,
+            output_height=output_height,
+            deformationmodel=deformationmodel,
+            gravitymodel=gravitymodel,
+            **kwargs,
+        )
 
 
 def _spredning(

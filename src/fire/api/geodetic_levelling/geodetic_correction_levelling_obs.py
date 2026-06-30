@@ -34,7 +34,6 @@ def apply_geodetic_corrections_to_height_diff(
     epoch_target: pd.Timestamp = None,
     tidal_system: str = None,
     use_approx_tidal_formulas: bool = False,
-    grid_inputfolder: Path = None,
     deformationmodel: str = None,
     gravitymodel: str = None,
 ) -> tuple[float, HeightDiffCorrections]:
@@ -46,12 +45,11 @@ def apply_geodetic_corrections_to_height_diff(
     with an argument for parameter tidal_system.
 
     The metric height difference is propagated to a target epoch if and only if
-    the function is called with arguments for all three parameters epoch_target, deformationmodel
-    and grid_inputfolder.
+    the function is called with arguments for the parameters epoch_target and deformationmodel
 
     The metric height difference is converted to geopotential units if and only
     if the function is called with argument "gpu" for parameter height_diff_unit and with arguments
-    for both parameter gravitymodel and grid_inputfolder.
+    for parameter gravitymodel
 
     Args:
     height_diff: float, metric height difference to be corrected/converted
@@ -70,8 +68,6 @@ def apply_geodetic_corrections_to_height_diff(
     use_approx_tidal_formulas: bool = False, optional parameter, determines whether approx or
     rigorous formulas are used for tidal transformation of input height difference and gravity.
     By default rigorous formulas are used.
-    grid_inputfolder: Path = None, optional parameter, folder for input grid, i.e. deformation model
-    and/or gravity model
     deformationmodel: str = None, optional parameter, deformation model used for the propagation
     of input height difference, must be in GeoTIFF or GTX file format, e.g. "NKG2016_lev.tif"
     gravitymodel: str = None, optional parameter, gravity model used for the conversion of input
@@ -94,31 +90,26 @@ def apply_geodetic_corrections_to_height_diff(
         )
 
     # If the height difference is to be propagated to a target epoch the function must be called with
-    # relevant arguments for parameters grid_inputfolder and deformationmodel
-    if (epoch_target is not None) and (
-        (deformationmodel is None) or (grid_inputfolder is None)
-    ):
+    # relevant arguments deformationmodel
+    if (epoch_target is not None) and deformationmodel is None:
         raise ValueError(
             f"Function apply_geodetic_corrections_to_height_diff: Wrong arguments for\n\
-        parameter deformationmodel and/or grid_inputfolder."
+        parameter deformationmodel."
         )
 
     # If the height difference is to be converted to geopotential units the function must be called with
-    # relevant arguments for parameters grid_inputfolder and gravitymodel
-    if height_diff_unit == "gpu" and (
-        (gravitymodel is None) or (grid_inputfolder is None)
-    ):
+    # relevant arguments for gravitymodel
+    if height_diff_unit == "gpu" and gravitymodel is None:
         raise ValueError(
             f"Function apply_geodetic_corrections_to_height_diff: Wrong arguments for\n\
-        parameter gravitymodel and/or grid_inputfolder."
+        parameter gravitymodel."
         )
 
     corrections = HeightDiffCorrections()
 
     # Tidal correction of metric height difference
     if tidal_system is not None:
-        (height_diff, tidal_corr) = apply_tidal_corrections_to_height_diff(
-            height_diff,
+        corrections.tidal_corr = apply_tidal_corrections_to_height_diff(
             point_from_lat,
             point_from_long,
             point_to_lat,
@@ -126,45 +117,35 @@ def apply_geodetic_corrections_to_height_diff(
             epoch_obs,
             tidal_system,
             use_approx_tidal_formulas,
-            grid_inputfolder=grid_inputfolder,
             gravitymodel=gravitymodel,
         )
 
-        corrections.tidal_corr = tidal_corr
-
     # Propagation of metric height difference to a target epoch
     if epoch_target is not None:
-        (height_diff, epoch_corr) = propagate_height_diff_from_epoch_to_epoch(
-            height_diff,
+        corrections.epoch_corr = propagate_height_diff_from_epoch_to_epoch(
             point_from_lat,
             point_from_long,
             point_to_lat,
             point_to_long,
             epoch_obs,
             epoch_target,
-            grid_inputfolder,
             deformationmodel,
         )
 
-        corrections.epoch_corr = epoch_corr
-
     # Conversion of metric height difference to geopotential units
     if height_diff_unit == "gpu":
-        (height_diff, m2gpu_factor) = (
-            convert_metric_height_diff_to_geopotential_height_diff(
-                height_diff,
-                point_from_lat,
-                point_from_long,
-                point_to_lat,
-                point_to_long,
-                grid_inputfolder,
-                gravitymodel,
-                tidal_system,
-                use_approx_tidal_formulas,
-            )
+        corrections.m2gpu_factor = convert_metric_height_diff_to_geopotential_height_diff(
+            point_from_lat,
+            point_from_long,
+            point_to_lat,
+            point_to_long,
+            gravitymodel,
+            tidal_system,
+            use_approx_tidal_formulas,
         )
 
-        corrections.m2gpu_factor = m2gpu_factor
+    # Apply corrections
+    height_diff = (height_diff + corrections.tidal_corr + corrections.epoch_corr)*corrections.m2gpu_factor
 
     return (height_diff, corrections)
 
@@ -176,7 +157,6 @@ def apply_geodetic_corrections_to_height_diff_objects(
     epoch_target: pd.Timestamp = None,
     tidal_system: str = None,
     use_approx_tidal_formulas: bool = False,
-    grid_inputfolder: Path = None,
     deformationmodel: str = None,
     gravitymodel: str = None,
 ) -> tuple[dict[str, NivObservation], pd.DataFrame]:
@@ -189,12 +169,11 @@ def apply_geodetic_corrections_to_height_diff_objects(
     with an argument for parameter tidal_system.
 
     The metric height differences are propagated to a target epoch if and only if
-    the function is called with arguments for all three parameters epoch_target, deformationmodel
-    and grid_inputfolder.
+    the function is called with arguments for parameters epoch_target and deformationmodel
 
     The metric height differences are converted to geopotential units if and only
     if the function is called with argument "gpu" for parameter height_diff_unit and with arguments
-    for both parameter gravitymodel and grid_inputfolder.
+    for parameter gravitymodel.
 
     Args:
     height_diff_objects: dict[str, NivObservation], dict of NivObservation objects with metric
@@ -210,8 +189,6 @@ def apply_geodetic_corrections_to_height_diff_objects(
     use_approx_tidal_formulas: bool = False, optional parameter, determines whether approx or
     rigorous formulas are used for tidal transformation of height differences and gravity.
     By default rigorous formulas are used.
-    grid_inputfolder: Path = None, optional parameter, folder for input grid, i.e. deformation model
-    and/or gravity model
     deformationmodel: str = None, optional parameter, deformation model used for the propagation
     of input height differences, must be in GeoTIFF or GTX file format, e.g. "NKG2016_lev.tif"
     gravitymodel: str = None, optional parameter, gravity model used for the conversion of input
@@ -243,7 +220,6 @@ def apply_geodetic_corrections_to_height_diff_objects(
             epoch_target,
             tidal_system,
             use_approx_tidal_formulas,
-            grid_inputfolder,
             deformationmodel,
             gravitymodel,
         )

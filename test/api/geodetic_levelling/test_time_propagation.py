@@ -20,49 +20,41 @@ epoch_obs = pd.Timestamp(year=2024, month=3, day=12, hour=11, minute=35)
 # Epoch target
 epoch_target = pd.Timestamp(year=2000, month=1, day=1)
 
-# Grid inputfolder and deformation model
-grid_inputfolder = Path("C:/FIRE-DEV/src/fire/data")
 deformationmodel = "DKup24geo_DTU2024_PK.tif"
 
 
 def test_propagate_height_diff_from_epoch_to_epoch():
     # Null propagation of height difference
-    height_diff_propagated_null, epoch_corr = propagate_height_diff_from_epoch_to_epoch(
-        height_diff,
+    height_diff_propagated_null = height_diff + propagate_height_diff_from_epoch_to_epoch(
         point_from_lat,
         point_from_long,
         point_to_lat,
         point_to_long,
         epoch_obs,
         epoch_obs,
-        grid_inputfolder,
         deformationmodel,
     )
     # Backward propagation of height difference
-    height_diff_propagated_backward, epoch_corr = (
+    height_diff_propagated_backward = height_diff + (
         propagate_height_diff_from_epoch_to_epoch(
-            height_diff,
             point_from_lat,
             point_from_long,
             point_to_lat,
             point_to_long,
             epoch_obs,
             epoch_target,
-            grid_inputfolder,
             deformationmodel,
         )
     )
     # Forward propagation of height difference
-    height_diff_propagated_forward, epoch_corr = (
+    height_diff_propagated_forward = height_diff_propagated_backward + (
         propagate_height_diff_from_epoch_to_epoch(
-            height_diff_propagated_backward,
             point_from_lat,
             point_from_long,
             point_to_lat,
             point_to_long,
             epoch_target,
             epoch_obs,
-            grid_inputfolder,
             deformationmodel,
         )
     )

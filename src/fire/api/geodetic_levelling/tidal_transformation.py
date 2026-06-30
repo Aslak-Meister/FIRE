@@ -18,7 +18,6 @@ import fire.api.geodetic_levelling.geophysical_parameters as geo_p
 
 
 def apply_tidal_corrections_to_height_diff(
-    height_diff: float,
     point_from_lat: float,
     point_from_long: float,
     point_to_lat: float,
@@ -26,24 +25,23 @@ def apply_tidal_corrections_to_height_diff(
     epoch_obs: pd.Timestamp,
     tidal_system: str,
     use_approx_tidal_formulas: bool = False,
-    grid_inputfolder: Path = None,
     gravitymodel: str = None,
-) -> tuple[float, float]:
-    """Apply tidal corrections to a metric height difference.
-
-    Applies tidal corrections to a metric height difference and returns the corrected
-    height difference and the correction itself in a tuple.
+) -> float:
+    """Compute tidal correction to a metric height difference.
 
     The application of tidal corrections to a metric height difference implies that all periodic
     tidal effects are removed, whereas the permanent tidal effects are removed or retained
     (in whole or in part) depending on the specified tidal system.
+
+    Firstly, computes the correction to remove all tidal effects, i.e. the non-tidal system.
+    If necessary, as dictated by `tidal_system`, further corrections are computed in order to move
+    from non-tidal to either the mean- or zero-tidal system.
 
     Reference:
     Klaus Schmidt, The Danish height system DVR90, pp. app 15-16.
     National Survey and Cadastre, 2000
 
     Args:
-    height_diff: float, metric height difference to be tidally corrected
     point_from_lat: float, latitude of from point in units of degrees
     point_from_long: float, longitude of from point in units of degrees
     point_to_lat: float, latitiude of to point in units of degrees
@@ -54,15 +52,12 @@ def apply_tidal_corrections_to_height_diff(
     use_approx_tidal_formulas: bool = False, optional parameter, determines whether approx or
     rigorous formulas are used for tidal transformation of a height difference/gravity.
     Only relevant if tidal system is mean tide or zero tide. By default rigorous formulas are used
-    grid_inputfolder: Path = None, optional parameter, folder for input grid, i.e. gravity model,
-    only relevant if rigorous tidal formulas are used and tidal system is mean tide or zero tide
     gravitymodel: str = None, optional parameter, grid-based model providing gravity in units of
     mGal (1 mGal = 10^-5 m/s^2), must be in GeoTIFF or GTX file format, only relevant if
     rigorous tidal formulas are used and tidal system is mean tide or zero tide
 
     Returns:
-    tuple[float, float], a tuple containing the corrected height difference and
-    the correction itself in units of meters
+    float, tidal correction in units of meters
 
     Raises:
     ?
@@ -82,11 +77,11 @@ def apply_tidal_corrections_to_height_diff(
     if (
         tidal_system != "non"
         and not use_approx_tidal_formulas
-        and ((gravitymodel is None) or (grid_inputfolder is None))
+        and gravitymodel is None
     ):
         exit(
             "Function apply_tidal_corrections_to_height_diff: Wrong arguments for\n\
-            parameter use_approx_tidal_formulas and/or gravitymodel and/or grid_inputfolder."
+            parameter use_approx_tidal_formulas and/or gravitymodel."
         )
 
     # Calculation of levelling section length and azimuth
@@ -150,10 +145,9 @@ def apply_tidal_corrections_to_height_diff(
     # a yielding/deforming Earth). Consequently, the corrected height difference is in
     # non-tidal system
     tidal_corr = (tidal_corr_moon + tidal_corr_sun) * 0.7 * 1e-8
-    height_diff_corrected = height_diff + tidal_corr
 
     if tidal_system == "non":
-        return (height_diff_corrected, tidal_corr)
+        return tidal_corr
 
     # If the specified tidal system is mean tide or zero tide, the corrected height difference
     # is transformed from non-tidal to the tidal system specified
@@ -163,21 +157,18 @@ def apply_tidal_corrections_to_height_diff(
     elif tidal_system == "zero":
         transformation = "non_to_zero"
 
-    height_diff_corrected = transform_height_diff_from_tidal_system_to_tidal_system(
-        height_diff_corrected,
+    # Apply extra correction to transform from non to (...)
+    tidal_corr = tidal_corr + transform_height_diff_from_tidal_system_to_tidal_system(
         transformation,
         point_from_lat,
         point_to_lat,
         point_from_long,
         point_to_long,
         use_approx_tidal_formulas,
-        grid_inputfolder,
         gravitymodel,
     )
 
-    tidal_corr = height_diff_corrected - height_diff
-
-    return (height_diff_corrected, tidal_corr)
+    return tidal_corr
 
 
 def calculate_perm_tidal_gravitation(
@@ -277,7 +268,6 @@ def calculate_perm_tidal_deformation_geoid(
     latitude: float,
     longitude: float,
     celestial_body: str,
-    grid_inputfolder: Path,
     gravitymodel: str,
 ) -> float:
     """Calculate the permanent tidal deformation of the geoid assuming a rigid Earth.
@@ -309,7 +299,6 @@ def calculate_perm_tidal_deformation_geoid(
     in units of degrees
     celestial_body: str, celestial body for which the permanent tidal deformation of the geoid
     is calculated, "moon" or "sun"
-    grid_inputfolder: Path, folder for input grid, i.e. gravity model
     gravitymodel: str, grid-based model providing gravity in units of mGal (1 mGal = 10^-5 m/s^2),
     must be in GeoTIFF or GTX file format, e.g. "dk-g-direkte-fra-gri-thokn.tif"
 
@@ -322,7 +311,7 @@ def calculate_perm_tidal_deformation_geoid(
     TO DO: Hvad sker der, hvis man i stedet bruger normaltyngder eller en konstant værdi for tyngden?
     Hvad er gjort ifm. udledningen af Ekmans approksimative formler?
     """
-    gravity = interpolate_gravity(latitude, longitude, grid_inputfolder, gravitymodel)
+    gravity = interpolate_gravity(latitude, longitude, gravitymodel)
 
     # Gravity is transformed from zero tide to non-tidal
     gravity = transform_gravity_from_tidal_system_to_tidal_system(
@@ -471,7 +460,6 @@ def transform_height_from_tidal_system_to_tidal_system(
     latitude: float,
     longitude: float,
     transformation: str,
-    grid_inputfolder: Path,
     gravitymodel: str,
 ) -> float:
     """Transform a geophysical height from one tidal system to another tidal system.
@@ -492,7 +480,6 @@ def transform_height_from_tidal_system_to_tidal_system(
     latitude: float, latitude of input height, in units of degrees
     longitude: float, longitude of input height, in units of degrees
     transformation: str, specification of source and target tidal system, e.g. "non_to_mean"
-    grid_inputfolder: Path, folder for input grid, i.e. gravity model
     gravitymodel: str, grid-based model providing gravity in units of mGal (1 mGal = 10^-5 m/s^2),
     must be in GeoTIFF or GTX file format, e.g. "dk-g-direkte-fra-gri-thokn.tif"
 
@@ -509,7 +496,6 @@ def transform_height_from_tidal_system_to_tidal_system(
         latitude,
         longitude,
         "moon",
-        grid_inputfolder,
         gravitymodel,
     )
 
@@ -517,7 +503,6 @@ def transform_height_from_tidal_system_to_tidal_system(
         latitude,
         longitude,
         "sun",
-        grid_inputfolder,
         gravitymodel,
     )
 
@@ -555,20 +540,18 @@ def transform_height_from_tidal_system_to_tidal_system(
 
 
 def transform_height_diff_from_tidal_system_to_tidal_system(
-    height_diff: float,
     transformation: str,
     point_from_lat: float,
     point_to_lat: float,
     point_from_long: float = None,
     point_to_long: float = None,
     use_approx_tidal_formulas: bool = False,
-    grid_inputfolder: Path = None,
     gravitymodel: str = None,
 ) -> float:
-    """Transform a geophysical height difference from one tidal system to another tidal system.
+    """Compute factor for transforming a geophysical height difference between tidal systems.
 
     Transforms a geophysical height difference above the geoid (e.g. a levelled height) from one
-    tidal system to another tidal system and returns the result as a float.
+    tidal system to another tidal system.
 
     The height difference to be transformed is assumed to have been tidally corrected
     (i.e. referred to a specific tidal system) before being transformed to another tidal system
@@ -579,8 +562,6 @@ def transform_height_diff_from_tidal_system_to_tidal_system(
     pp. 128-129, eq. (24), (25). Nordic Geodetic Commission, 1988
 
     Args:
-    height_diff: float, geophysical height difference to be transformed from one tidal system
-    to another, in units of m
     transformation: str, specification of source and target tidal system, e.g. "non_to_mean"
     point_from_lat: float, latitude of from point in units of degrees
     point_to_lat: float, latitiude of to point in units of degrees
@@ -591,14 +572,12 @@ def transform_height_diff_from_tidal_system_to_tidal_system(
     use_approx_tidal_formulas: bool = False, optional parameter, determines whether approx or
     rigorous formulas are used for tidal transformation of a height difference/gravity. By default
     rigorous formulas are used
-    grid_inputfolder: Path = None, optional parameter, folder for input grid, i.e. gravity model,
-    only relevant if rigorous tidal formulas are used
     gravitymodel: str = None, optional parameter, grid-based model providing gravity in units of
     mGal (1 mGal = 10^-5 m/s^2), must be in GeoTIFF or GTX file format, only relevant if
     rigorous tidal formulas are used
 
     Returns:
-    float, the transformed height difference in units of m
+    float, the transformation factor in units of m
 
     Raises:
     ?
@@ -608,26 +587,19 @@ def transform_height_diff_from_tidal_system_to_tidal_system(
     """
     # Transformation of height difference using approx formula
     if use_approx_tidal_formulas:
-        height_diff_transformed = (
-            approx_transform_height_diff_from_tidal_system_to_tidal_system(
-                height_diff,
-                point_from_lat,
-                point_to_lat,
-                transformation,
-            )
+        return approx_transform_height_diff_from_tidal_system_to_tidal_system(
+            point_from_lat,
+            point_to_lat,
+            transformation,
         )
 
-        return height_diff_transformed
-
     # Transformation of height difference using rigorous formulas
-    height_diff_transformed = (
-        height_diff
-        + transform_height_from_tidal_system_to_tidal_system(
+    return (
+        transform_height_from_tidal_system_to_tidal_system(
             0,
             point_to_lat,
             point_to_long,
             transformation,
-            grid_inputfolder,
             gravitymodel,
         )
         - transform_height_from_tidal_system_to_tidal_system(
@@ -635,22 +607,18 @@ def transform_height_diff_from_tidal_system_to_tidal_system(
             point_from_lat,
             point_from_long,
             transformation,
-            grid_inputfolder,
             gravitymodel,
         )
     )
 
-    return height_diff_transformed
-
 
 def approx_transform_height_diff_from_tidal_system_to_tidal_system(
-    height_diff: float,
     point_from_lat: float,
     point_to_lat: float,
     transformation: str,
 ) -> float:
-    """Transform a geophysical height difference from one tidal system to another tidal system
-    using approx formula.
+    """Compute factor for transforming height differences between tidal systems,
+    using approximative formulas
 
     Transforms a geophysical height difference above the geoid (e.g. a levelled height difference)
     from one tidal system to another tidal system using approx formula and returns the result
@@ -665,14 +633,12 @@ def approx_transform_height_diff_from_tidal_system_to_tidal_system(
     p. 131, eq. (29), (30), (31). Nordic Geodetic Commission, 1988
 
     Args:
-    height_diff: float, geophysical height difference to be transformed from one tidal system
-    to another, in units of m
     point_from_lat: float, latitude of from point in units of degrees
     point_to_lat: float, latitiude of to point in units of degrees
     transformation: str, specification of source and target tidal system, e.g. "non_to_mean"
 
     Returns:
-    float, the transformed height difference in units of m
+    float, the transformation factor in units of m
 
     Raises:
     ?
@@ -688,25 +654,20 @@ def approx_transform_height_diff_from_tidal_system_to_tidal_system(
     )
 
     if transformation == "non_to_mean":
-        height_diff_transformed = height_diff + geo_p.gamma * latitude_dependent_term
+        return geo_p.gamma * latitude_dependent_term
 
     elif transformation == "non_to_zero":
-        height_diff_transformed = (
-            height_diff + (geo_p.gamma - 1) * latitude_dependent_term
-        )
+        return (geo_p.gamma - 1) * latitude_dependent_term
 
     elif transformation == "mean_to_non":
-        height_diff_transformed = height_diff - geo_p.gamma * latitude_dependent_term
+        return - geo_p.gamma * latitude_dependent_term
 
     elif transformation == "mean_to_zero":
-        height_diff_transformed = height_diff - latitude_dependent_term
+        return - latitude_dependent_term
 
     elif transformation == "zero_to_non":
-        height_diff_transformed = (
-            height_diff - (geo_p.gamma - 1) * latitude_dependent_term
-        )
+        return - (geo_p.gamma - 1) * latitude_dependent_term
 
     elif transformation == "zero_to_mean":
-        height_diff_transformed = height_diff + latitude_dependent_term
+        return latitude_dependent_term
 
-    return height_diff_transformed

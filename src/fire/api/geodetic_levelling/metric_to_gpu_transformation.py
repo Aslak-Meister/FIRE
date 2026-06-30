@@ -23,41 +23,36 @@ from fire.api.niv.datatyper import (
 
 
 def convert_metric_height_diff_to_geopotential_height_diff(
-    height_diff: float,
     point_from_lat: float,
     point_from_long: float,
     point_to_lat: float,
     point_to_long: float,
-    grid_inputfolder: Path,
     gravitymodel: str,
     tidal_system: str | None,
     use_approx_tidal_formulas: bool = False,
-) -> tuple[float, float]:
-    """Convert a metric height difference to a geopotential height difference.
+) -> float:
+    """Compute conversion factor for metric to geopotential height difference conversion.
 
-    Converts a metric height difference to a geopotential height difference (in units of gpu)
-    and returns the converted height difference and the m2gpu multiplication factor in a tuple.
+    Computes the conversion factor for converting a metric height difference to a
+    geopotential height difference (in units of gpu).
 
     The gravity model used for the conversion is assumed to be in zero tide system as this is
     the conventional tide system for gravity.
 
-    If the input height difference is in the zero tide system, the gravity interpolated from the
-    gravity model is not tidally transformed.
+    Thus, if tidal system is the zero tide system, the gravity interpolated from the gravity
+    model is not tidally transformed.
 
-    If the input height difference is in non-tidal or mean tide system, the gravity interpolated
-    from the gravity model is transformed from the zero tide system to the tidal system of the
-    input height difference.
+    If tidal system is non-tidal or mean tide system, the gravity interpolated from the
+    gravity model is transformed from the zero tide system to the chose tidal system.
 
-    If the input height difference is not corrected for tidal effects, the gravity interpolated
-    from the gravity model is transformed from the zero tide system to the mean tide system.
+    If tidal system is not given, (i.e. for converting raw, uncorrected height differences),
+    the gravity interpolated from the gravity model is transformed to the mean tide system.
 
     Args:
-    height_diff: float, metric height difference to be converted to gpu
     point_from_lat: float, latitude of from point in units of degrees
     point_from_long: float, longitude of from point in units of degrees
     point_to_lat: float, latitiude of to point in units of degrees
     point_to_long: float, longitude of to point in units of degrees
-    grid_inputfolder: Path, folder for input grid, i.e. gravity model
     gravitymodel: str, gravity model used for the conversion of a height difference to gpu,
     must be in GeoTIFF or GTX file format, e.g. "dk-g-direkte-fra-gri-thokn.tif"
     tidal_system: str|None, tidal system of input height difference, i.e. "non", "mean" or "zero"
@@ -68,8 +63,7 @@ def convert_metric_height_diff_to_geopotential_height_diff(
     are used
 
     Returns:
-    tuple[float, float], a tuple containing the converted height difference
-    in units of gpu (1 gpu = 10 m^2/s^2) and the m2gpu multiplication factor in units of m/s^2
+    float, the m2gpu multiplication factor in units of m/s^2
 
     Raises:
     ?
@@ -78,14 +72,12 @@ def convert_metric_height_diff_to_geopotential_height_diff(
     point_from_gravity = interpolate_gravity(
         point_from_lat,
         point_from_long,
-        grid_inputfolder,
         gravitymodel,
     )
 
     point_to_gravity = interpolate_gravity(
         point_to_lat,
         point_to_long,
-        grid_inputfolder,
         gravitymodel,
     )
 
@@ -114,9 +106,8 @@ def convert_metric_height_diff_to_geopotential_height_diff(
 
     # Conversion of height_diff to geopotential units (1 gpu = 10 m^2/s^2)
     m2gpu_factor = mean_gravity * 0.1
-    height_diff = height_diff * m2gpu_factor
 
-    return (height_diff, m2gpu_factor)
+    return m2gpu_factor
 
 
 def convert_geopotential_height_to_normal_height(
@@ -216,7 +207,6 @@ def convert_geopotential_height_to_helmert_height(
     height: float,
     latitude: float,
     longitude: float,
-    grid_inputfolder: Path,
     gravitymodel: str,
     conversion: str,
     tidal_system: str = None,
@@ -263,7 +253,6 @@ def convert_geopotential_height_to_helmert_height(
     geopotential height or in units of m if a Helmert height
     latitude: float, latitude of input/source height, in units of degrees
     longitude: float, longitude of input/source height, in units of degrees
-    grid_inputfolder: Path, folder for input grid, i.e. gravity model
     gravitymodel: str, gravity model used for the height conversion, must be in GeoTIFF
     or GTX file format, e.g. "dk-g-direkte-fra-gri-thokn.tif"
     conversion: str, specification of source and target height, "geopot_to_helmert" or
@@ -287,71 +276,56 @@ def convert_geopotential_height_to_helmert_height(
     Raises:
     ?
     """
+    # Set tolerance for iterative computation of helmert heights to 0.01 mm
+    tolerance = 0.00001
+
+    def _conversion_factor(height):
+        """Compute conversion factor in units 10 m/s^2"""
+        return (gravity * 0.1) + (0.07045 * 1e-6 * height)
+
     if not conversion in ["geopot_to_helmert", "helmert_to_geopot"]:
         raise ValueError(
             "Function convert_geopotential_height_to_helmert_height: Wrong argument for parameter conversion."
         )
 
     # Interpolated gravity in units of m/s^2
-    gravity = interpolate_gravity(
-        latitude,
-        longitude,
-        grid_inputfolder,
-        gravitymodel,
-    )
+    gravity = interpolate_gravity(latitude, longitude, gravitymodel)
 
     # Interpolated gravity is tidally transformed if tidal system of input height
     # is different than zero tide
-    if tidal_system != "zero":
-        if tidal_system == "non":
-            transformation = "zero_to_non"
+    if tidal_system == "non":
+        transformation = "zero_to_non"
+    elif tidal_system == "mean" or tidal_system is None:
+        transformation = "zero_to_mean"
 
-        elif tidal_system == "mean" or tidal_system is None:
-            transformation = "zero_to_mean"
-
-        gravity = transform_gravity_from_tidal_system_to_tidal_system(
-            gravity, latitude, transformation, use_approx_tidal_formulas
-        )
-
-    # Conversion of a geopotential height to Helmert height
-    if conversion == "geopot_to_helmert":
-        # Conversion factor (metric Helmert height to geopotential height) in units of 10 m/s^2
-        conversion_factor = (gravity * 0.1) + (0.07045 * 1e-6 * approx_helmert_height)
-
-        # Helmert height in units of meters
-        height_converted = height / conversion_factor
-
-        # Iterative calculation of Helmert height
-        # The iteration is started if height_converted is not nan
-        if iterate == True and isnan(height_converted) == False:
-            while not (
-                -0.00001 <= (height_converted - approx_helmert_height) <= 0.00001
-            ):
-                approx_helmert_height = height_converted
-
-                # Conversion factor (metric Helmert height to geopotential height) in units of 10 m/s^2
-                conversion_factor = (gravity * 0.1) + (
-                    0.07045 * 1e-6 * approx_helmert_height
-                )
-
-                # Helmert height in units of meters
-                height_converted = height / conversion_factor
+    gravity = transform_gravity_from_tidal_system_to_tidal_system(
+        gravity, latitude, transformation, use_approx_tidal_formulas
+    )
 
     # Conversion of a Helmert height to geopotential height
-    elif conversion == "helmert_to_geopot":
-        # Conversion factor (metric Helmert height to geopotential height) in units of 10 m/s^2
-        conversion_factor = (gravity * 0.1) + (0.07045 * 1e-6 * height)
+    if conversion == "helmert_to_geopot":
+        conversion_factor = _conversion_factor(height)
+        gpu_converted = height * conversion_factor
+        return (gpu_converted, conversion_factor)
 
-        # Geopotential height in units of gpu (1 gpu = 10 m^2/s^2)
-        height_converted = height * conversion_factor
+    conversion_factor = _conversion_factor(approx_helmert_height)
+    helmert_converted = height / conversion_factor
 
-    return (height_converted, conversion_factor)
+    # Iterative calculation of Helmert height
+    if iterate == True and isnan(helmert_converted) == False:
+        while abs(helmert_converted - approx_helmert_height) > tolerance:
+
+            approx_helmert_height = helmert_converted
+
+            conversion_factor = _conversion_factor(approx_helmert_height)
+            helmert_converted = height / conversion_factor
+
+    return (helmert_converted, conversion_factor)
 
 
 def convert_geopotential_heights_to_metric_heights(
     height_objects: list[NivKote],
     conversion: str,
-    grid_inputfolder: Path = None,
     gravitymodel: str = None,
     tidal_system: str = None,
     use_approx_tidal_formulas: bool = False,
@@ -372,8 +346,6 @@ def convert_geopotential_heights_to_metric_heights(
     or metric heights to be converted
     conversion: str, specification of source and target height, "geopot_to_helmert",
     "helmert_to_geopot", "geopot_to_normal" or "normal_to_geopot"
-    grid_inputfolder: Path = None, optional parameter, folder for input grid, i.e. gravity model,
-    only relevant if geopotential heights are to be converted to Helmert heights or vice versa
     gravitymodel: str = None, optional parameter, gravity model used for the conversion of heights,
     must be in GeoTIFF or GTX file format, only relevant if geopotential heights are to be
     converted to Helmert heights or vice versa
@@ -395,7 +367,7 @@ def convert_geopotential_heights_to_metric_heights(
     height conversion
 
     Raises:
-    ? Hvis grid_inputfolder ikke findes, hvis grid-fil ikke findes,
+    ? Hvis grid-fil ikke findes
 
     TO DO: apriori_heights: list[InternKote]=[]?, try...?
     TO DO: Håndtering manglende a priori værdi?
@@ -415,11 +387,11 @@ def convert_geopotential_heights_to_metric_heights(
         )
 
     if (conversion == "geopot_to_helmert" or conversion == "helmert_to_geopot") and (
-        (gravitymodel is None) or (grid_inputfolder is None)
+        gravitymodel is None
     ):
         exit(
             "Function convert_geopotential_heights_to_metric_heights: Wrong arguments for\n\
-            parameter grid_inputfolder and/or gravitymodel."
+            parameter gravitymodel."
         )
 
     # Output list for converted heights
@@ -461,7 +433,6 @@ def convert_geopotential_heights_to_metric_heights(
                     height,
                     latitude,
                     longitude,
-                    grid_inputfolder,
                     gravitymodel,
                     conversion,
                     tidal_system=tidal_system,
